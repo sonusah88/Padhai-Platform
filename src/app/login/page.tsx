@@ -63,14 +63,15 @@ export default function LoginPage() {
     }
   }
 
-  async function handleGoogleLogin() {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const isPlaceholder = !supabaseUrl || supabaseUrl.includes('placeholder');
+  async function handleGoogleLogin(e?: React.MouseEvent) {
+    if (e) e.preventDefault();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const isPlaceholder = !supabaseUrl || supabaseUrl.includes('placeholder') || supabaseUrl === '';
 
     if (isPlaceholder) {
       document.cookie = "padhai_session=true; path=/; max-age=86400";
       if (typeof window !== 'undefined') {
-        localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role: 'student' }));
       }
       router.push('/dashboard');
       router.refresh();
@@ -89,7 +90,7 @@ export default function LoginPage() {
       if (error) {
         document.cookie = "padhai_session=true; path=/; max-age=86400";
         if (typeof window !== 'undefined') {
-          localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+          localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role: 'student' }));
         }
         router.push('/dashboard');
         router.refresh();
@@ -97,11 +98,21 @@ export default function LoginPage() {
     } catch {
       document.cookie = "padhai_session=true; path=/; max-age=86400";
       if (typeof window !== 'undefined') {
-        localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role: 'student' }));
       }
       router.push('/dashboard');
       router.refresh();
     }
+  }
+
+  // Quick Demo Login function
+  function handleDemoLogin() {
+    document.cookie = "padhai_session=true; path=/; max-age=86400";
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('padhai_user', JSON.stringify({ email: 'demo@padhai.com', full_name: 'Demo Student', role: 'student' }));
+    }
+    router.push('/dashboard');
+    router.refresh();
   }
 
   return (
@@ -126,8 +137,18 @@ export default function LoginPage() {
             {t('signInSubtitle')}
           </p>
 
+          {/* Quick Demo Sign In (Dev/Fallback) */}
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 mb-4 border border-[hsl(var(--primary))] bg-[hsl(var(--primary-light))] text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary-hover))] hover:text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            🚀 1-Click Demo Sign In
+          </button>
+
           {/* Google Sign In */}
           <button
+            type="button"
             onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-[hsl(var(--border))] rounded-xl text-sm font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors mb-6"
           >
