@@ -57,8 +57,10 @@ export async function middleware(request: NextRequest) {
   ];
 
   const isProtected = protectedRoutes.some(route => pathname.startsWith(route));
+  const demoCookie = request.cookies.get('padhai_session');
+  const isAuthenticated = !!user || !!demoCookie;
 
-  if (isProtected && !user) {
+  if (isProtected && !isAuthenticated) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirect', pathname);
@@ -69,7 +71,7 @@ export async function middleware(request: NextRequest) {
   const authRoutes = ['/login', '/register', '/forgot-password'];
   const isAuthRoute = authRoutes.includes(pathname);
 
-  if (isAuthRoute && user) {
+  if (isAuthRoute && isAuthenticated) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);

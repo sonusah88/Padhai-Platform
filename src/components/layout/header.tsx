@@ -104,10 +104,10 @@ export function Header() {
             {/* Auth Buttons */}
             <div className="hidden sm:flex items-center gap-2 ml-1">
               <Link
-                href="/login"
-                className="px-4 py-2 text-sm font-medium text-[hsl(var(--foreground-secondary))] hover:text-[hsl(var(--foreground))] rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
+                href="/dashboard"
+                className="px-3.5 py-2 text-sm font-semibold text-[hsl(var(--primary))] bg-[hsl(var(--primary-light))] rounded-lg hover:bg-[hsl(var(--primary)/0.15)] transition-colors"
               >
-                {tCommon('signIn')}
+                {t('dashboard')}
               </Link>
               <Link
                 href="/register"
