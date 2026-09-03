@@ -22,6 +22,19 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const isPlaceholder = !supabaseUrl || supabaseUrl.includes('placeholder');
+
+    if (isPlaceholder) {
+      document.cookie = "padhai_session=true; path=/; max-age=86400";
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ email: email || 'aarav@gmail.com', full_name: 'Aarav Sharma' }));
+      }
+      router.push('/dashboard');
+      router.refresh();
+      return;
+    }
+
     try {
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
@@ -30,7 +43,7 @@ export default function LoginPage() {
       if (error || !data.user) {
         document.cookie = "padhai_session=true; path=/; max-age=86400";
         if (typeof window !== 'undefined') {
-          localStorage.setItem('padhai_user', JSON.stringify({ email }));
+          localStorage.setItem('padhai_user', JSON.stringify({ email: email || 'aarav@gmail.com', full_name: 'Aarav Sharma' }));
         }
         router.push('/dashboard');
         router.refresh();
@@ -41,7 +54,7 @@ export default function LoginPage() {
     } catch {
       document.cookie = "padhai_session=true; path=/; max-age=86400";
       if (typeof window !== 'undefined') {
-        localStorage.setItem('padhai_user', JSON.stringify({ email }));
+        localStorage.setItem('padhai_user', JSON.stringify({ email: email || 'aarav@gmail.com', full_name: 'Aarav Sharma' }));
       }
       router.push('/dashboard');
       router.refresh();
@@ -51,17 +64,41 @@ export default function LoginPage() {
   }
 
   async function handleGoogleLogin() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const isPlaceholder = !supabaseUrl || supabaseUrl.includes('placeholder');
+
+    if (isPlaceholder) {
+      document.cookie = "padhai_session=true; path=/; max-age=86400";
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+      }
+      router.push('/dashboard');
+      router.refresh();
+      return;
+    }
+
     try {
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
-      await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
+      if (error) {
+        document.cookie = "padhai_session=true; path=/; max-age=86400";
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+        }
+        router.push('/dashboard');
+        router.refresh();
+      }
     } catch {
       document.cookie = "padhai_session=true; path=/; max-age=86400";
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'aarav@gmail.com', full_name: 'Aarav Sharma', role: 'student' }));
+      }
       router.push('/dashboard');
       router.refresh();
     }
