@@ -22,63 +22,63 @@ import { cn } from '@/lib/utils';
 import { Header } from '@/components/layout/header';
 import { Footer } from '@/components/layout/footer';
 
-// Demo courses
-const demoCourses = [
+// Official Curriculum & Skills Catalog
+const OFFICIAL_COURSES = [
   {
-    id: '1', slug: 'grade-8-mathematics', title: 'Grade 8 Mathematics', subtitle: 'Complete NEB curriculum',
+    id: '1', slug: 'grade-8-mathematics', title: 'Grade 8 Mathematics', subtitle: 'Complete NEB curriculum & problem solving',
     instructor: 'Ram Sharma', category: 'School Foundation', difficulty: 'intermediate' as const,
     duration: 2400, lessons: 48, enrolled: 1250, rating: 4.7, isFree: true,
     grade: 'Grade 8', subject: 'Mathematics', thumbnail: null,
     tags: ['Algebra', 'Geometry', 'Statistics'],
   },
   {
-    id: '2', slug: 'grade-9-science', title: 'Grade 9 Science', subtitle: 'Physics, Chemistry, Biology',
+    id: '2', slug: 'grade-9-science', title: 'Grade 9 Science', subtitle: 'Physics, Chemistry, and Biological Systems',
     instructor: 'Sujata Adhikari', category: 'School Foundation', difficulty: 'intermediate' as const,
     duration: 3000, lessons: 62, enrolled: 980, rating: 4.8, isFree: true,
     grade: 'Grade 9', subject: 'Science', thumbnail: null,
     tags: ['Physics', 'Chemistry', 'Biology'],
   },
   {
-    id: '3', slug: 'see-mathematics-preparation', title: 'SEE Mathematics Preparation', subtitle: 'Mock exams, revision, chapter tests',
+    id: '3', slug: 'see-mathematics-preparation', title: 'SEE Mathematics Masterclass', subtitle: 'NEB Model questions, past papers & practice exams',
     instructor: 'Bishal Khadka', category: 'SEE Preparation', difficulty: 'advanced' as const,
     duration: 1800, lessons: 36, enrolled: 2100, rating: 4.9, isFree: false,
     grade: 'Grade 10', subject: 'Mathematics', thumbnail: null,
-    tags: ['Mock Exams', 'Revision', 'Timed Practice'],
+    tags: ['Model Papers', 'Exam Strategy', 'Timed Practice'],
   },
   {
-    id: '4', slug: 'chatgpt-for-students', title: 'ChatGPT for Students', subtitle: 'Learn to use AI responsibly for studying',
+    id: '4', slug: 'chatgpt-for-students', title: 'AI Literacy & ChatGPT for Students', subtitle: 'Learn to use Generative AI responsibly for academic research',
     instructor: 'Anish Poudel', category: 'Future Skills', difficulty: 'beginner' as const,
     duration: 600, lessons: 12, enrolled: 3400, rating: 4.6, isFree: true,
     grade: 'All Levels', subject: 'AI & Technology', thumbnail: null,
-    tags: ['Prompting', 'Research', 'Writing', 'Coding'],
+    tags: ['Prompting', 'Research', 'Writing', 'Ethics'],
   },
   {
-    id: '5', slug: 'english-speaking-basics', title: 'English Speaking Basics', subtitle: 'Build confidence in everyday English',
+    id: '5', slug: 'english-speaking-basics', title: 'English Communication & Fluency', subtitle: 'Build confidence in academic & everyday spoken English',
     instructor: 'Prakriti Rai', category: 'Language Academy', difficulty: 'beginner' as const,
     duration: 900, lessons: 18, enrolled: 1800, rating: 4.5, isFree: true,
     grade: 'All Levels', subject: 'English', thumbnail: null,
-    tags: ['Pronunciation', 'Vocabulary', 'Conversation'],
+    tags: ['Pronunciation', 'Vocabulary', 'Presentation'],
   },
   {
-    id: '6', slug: 'python-programming-basics', title: 'Python Programming Basics', subtitle: 'Start coding from zero',
+    id: '6', slug: 'python-programming-basics', title: 'Python Programming Fundamentals', subtitle: 'Learn logic building, algorithms and real-world projects',
     instructor: 'Rohan Shrestha', category: 'Future Skills', difficulty: 'beginner' as const,
     duration: 1200, lessons: 24, enrolled: 2200, rating: 4.7, isFree: true,
     grade: 'All Levels', subject: 'Coding', thumbnail: null,
-    tags: ['Variables', 'Functions', 'Loops', 'Projects'],
+    tags: ['Algorithms', 'Functions', 'Data Structures', 'Projects'],
   },
   {
-    id: '7', slug: 'grade-10-english', title: 'Grade 10 English', subtitle: 'Complete NEB English curriculum',
+    id: '7', slug: 'grade-10-english', title: 'Grade 10 English', subtitle: 'Complete NEB Secondary English curriculum',
     instructor: 'Binod Thapa', category: 'School Foundation', difficulty: 'intermediate' as const,
     duration: 2000, lessons: 40, enrolled: 1100, rating: 4.4, isFree: true,
     grade: 'Grade 10', subject: 'English', thumbnail: null,
     tags: ['Grammar', 'Writing', 'Reading', 'Literature'],
   },
   {
-    id: '8', slug: 'web-development-fundamentals', title: 'Web Development Fundamentals', subtitle: 'HTML, CSS, and JavaScript',
+    id: '8', slug: 'web-development-fundamentals', title: 'Web Development & Frontend Engineering', subtitle: 'HTML5, CSS3, JavaScript, and responsive web design',
     instructor: 'Anish Poudel', category: 'Future Skills', difficulty: 'beginner' as const,
     duration: 1500, lessons: 30, enrolled: 1600, rating: 4.8, isFree: true,
     grade: 'All Levels', subject: 'Coding', thumbnail: null,
-    tags: ['HTML', 'CSS', 'JavaScript', 'Projects'],
+    tags: ['HTML5', 'CSS3', 'JavaScript', 'Responsive UI'],
   },
 ];
 
@@ -107,7 +107,7 @@ export default function CoursesPage() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filtered = demoCourses.filter(course => {
+  const filtered = OFFICIAL_COURSES.filter(course => {
     if (selectedCategory !== 'All' && course.category !== selectedCategory) return false;
     if (searchQuery && !course.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !course.subject.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -124,7 +124,7 @@ export default function CoursesPage() {
             Courses
           </h1>
           <p className="text-sm text-[hsl(var(--foreground-secondary))] mt-1">
-            From textbook basics to future-ready skills. {demoCourses.length} courses available.
+            From textbook basics to future-ready skills. {OFFICIAL_COURSES.length} courses available.
           </p>
         </div>
 

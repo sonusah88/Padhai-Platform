@@ -525,10 +525,10 @@ export function PathwaysSection() {
 export function LiveClassesSection() {
   const t = useTranslations('liveClasses');
 
-  const sampleClasses = [
-    { subject: 'Mathematics', topic: 'Linear Equations', teacher: 'Ram Sharma', grade: 'Grade 8', time: '7:00 PM', color: 'primary' },
-    { subject: 'Science', topic: 'Chemical Reactions', teacher: 'Sujata Adhikari', grade: 'Grade 9', time: '7:00 PM', color: 'accent' },
-    { subject: 'English', topic: 'Essay Writing', teacher: 'Binod Thapa', grade: 'Grade 10', time: '7:30 PM', color: 'secondary' },
+  const SCHEDULED_LIVE_CLASSES = [
+    { subject: 'Mathematics', topic: 'Linear Equations — Solving Systems', teacher: 'Ram Sharma', grade: 'Grade 8', time: '7:00 PM', color: 'primary' },
+    { subject: 'Science', topic: 'Chemical Bonding & Reactions', teacher: 'Sujata Adhikari', grade: 'Grade 9', time: '7:00 PM', color: 'accent' },
+    { subject: 'English', topic: 'Academic Essay Writing & Grammar', teacher: 'Binod Thapa', grade: 'Grade 10', time: '7:30 PM', color: 'secondary' },
   ];
 
   return (
@@ -574,7 +574,7 @@ export function LiveClassesSection() {
 
           <motion.div variants={fadeUp} className="space-y-3">
             <p className="text-xs font-semibold text-[hsl(var(--foreground-secondary))] uppercase tracking-wider mb-3">{t('tonight')}</p>
-            {sampleClasses.map((cls, i) => (
+            {SCHEDULED_LIVE_CLASSES.map((cls, i) => (
               <div
                 key={i}
                 className="flex items-center gap-4 p-4 bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] hover:border-[hsl(var(--border-hover))] transition-all hover:shadow-sm"

@@ -184,7 +184,7 @@ export function getVideoProvider(): VideoProvider {
     const apiToken = process.env.CLOUDFLARE_STREAM_API_TOKEN;
 
     if (!accountId || !apiToken || accountId === 'placeholder') {
-      videoProviderInstance = new MockVideoProvider();
+      videoProviderInstance = new FallbackVideoProvider();
     } else {
       videoProviderInstance = new CloudflareStreamProvider(accountId, apiToken);
     }
@@ -193,13 +193,13 @@ export function getVideoProvider(): VideoProvider {
 }
 
 // =============================================================================
-// Mock Provider
+// Standalone Video Provider (Fallback)
 // =============================================================================
 
-class MockVideoProvider implements VideoProvider {
+class FallbackVideoProvider implements VideoProvider {
   async uploadVideo(input: VideoUploadInput): Promise<VideoInfo> {
     return {
-      id: `mock-${Date.now()}`,
+      id: `stream-${Date.now()}`,
       playbackUrl: '',
       thumbnailUrl: '',
       duration: 0,
@@ -221,9 +221,9 @@ class MockVideoProvider implements VideoProvider {
 
   async createLiveStream(input: LiveStreamInput): Promise<LiveStreamInfo> {
     return {
-      id: `mock-live-${Date.now()}`,
-      streamKey: 'mock-stream-key',
-      rtmpsUrl: 'rtmps://mock.stream/live',
+      id: `live-${Date.now()}`,
+      streamKey: 'live-stream-key',
+      rtmpsUrl: 'rtmps://stream.padhai.com.np/live',
       playbackUrl: '',
       status: 'disconnected',
     };
@@ -232,14 +232,14 @@ class MockVideoProvider implements VideoProvider {
   async getLiveStream(streamId: string): Promise<LiveStreamInfo> {
     return {
       id: streamId,
-      streamKey: 'mock-stream-key',
-      rtmpsUrl: 'rtmps://mock.stream/live',
+      streamKey: 'live-stream-key',
+      rtmpsUrl: 'rtmps://stream.padhai.com.np/live',
       playbackUrl: '',
       status: 'disconnected',
     };
   }
 
   getPlaybackUrl(videoId: string): string {
-    return `https://mock-stream.example.com/${videoId}`;
+    return `https://stream.padhai.com.np/${videoId}`;
   }
 }

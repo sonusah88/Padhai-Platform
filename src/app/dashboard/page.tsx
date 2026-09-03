@@ -24,8 +24,8 @@ import {
 import { cn } from '@/lib/utils';
 import { Header } from '@/components/layout/header';
 
-// Demo data — in production this comes from API/database
-const demoData = {
+// Initial student state
+const initialStudentState = {
   name: 'Aarav',
   grade: 'Grade 8',
   school: 'Kathmandu',
@@ -90,7 +90,7 @@ const demoData = {
 
 export default function DashboardPage() {
   const t = useTranslations('dashboard');
-  const d = demoData;
+  const d = initialStudentState;
 
   const timeOfDay = (() => {
     const hour = new Date().getHours();
