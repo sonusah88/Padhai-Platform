@@ -224,7 +224,15 @@
     "google": "Continue with Google",
     "terms": "By creating an account, you agree to our Terms of Service and Privacy Policy.",
     "resetPassword": "Reset password",
-    "resetPasswordDesc": "Enter your email and we'll send you a link to reset your password."
+    "resetPasswordDesc": "Enter your email and we'll send you a link to reset your password.",
+    "verifyEmailTitle": "Verify your email address",
+    "verifyEmailSubtitle": "We've sent a 6-digit verification code to {email}",
+    "enterCode": "Enter 6-digit code",
+    "verifyButton": "Verify Email",
+    "resendCode": "Resend code",
+    "resendIn": "Resend code in {seconds}s",
+    "codeVerified": "Email verified successfully!",
+    "invalidCode": "Invalid verification code. Please try again."
   },
   "onboarding": {
     "welcome": "Welcome to Padhai!",

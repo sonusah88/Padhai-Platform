@@ -44,25 +44,16 @@ export default function RegisterPage() {
         },
       });
 
-      if (error || !data.user) {
-        // Fallback for unconfigured/offline Supabase environment
-        document.cookie = "padhai_session=true; path=/; max-age=86400";
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('padhai_user', JSON.stringify({ full_name: fullName || 'Student', email, role }));
-        }
-        router.push('/dashboard');
-        router.refresh();
-      } else {
-        router.push('/dashboard');
-        router.refresh();
-      }
-    } catch {
-      // Direct smooth fallback
-      document.cookie = "padhai_session=true; path=/; max-age=86400";
       if (typeof window !== 'undefined') {
-        localStorage.setItem('padhai_user', JSON.stringify({ full_name: fullName || 'Student', email, role }));
+        localStorage.setItem('padhai_user', JSON.stringify({ full_name: fullName || 'Student', email, role, email_verified: false }));
       }
-      router.push('/dashboard');
+      router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+      router.refresh();
+    } catch {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ full_name: fullName || 'Student', email, role, email_verified: false }));
+      }
+      router.push(`/verify-email?email=${encodeURIComponent(email)}`);
       router.refresh();
     } finally {
       setLoading(false);
