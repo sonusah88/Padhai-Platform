@@ -88,7 +88,7 @@ const initialStudentState = {
   },
 };
 
-import { UserProfileHeader } from '@/components/dashboard/user-profile-header';
+
 
 export default function DashboardPage() {
   const t = useTranslations('dashboard');
@@ -105,14 +105,46 @@ export default function DashboardPage() {
     <>
       <Header />
       <main className="container-narrow py-6 pb-24 lg:pb-6">
-        {/* Top User Profile Header Banner */}
-        <UserProfileHeader
-          streak={d.streak}
-          xp={d.xp}
-          todayXP={d.todayXP}
-          level={d.level}
-          weeklyGoalProgress={d.weeklyGoalProgress}
-        />
+        {/* Greeting + Weekly Goal */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[hsl(var(--foreground))]">
+              {t('greeting', { timeOfDay, name: d.name })}
+            </h1>
+            <p className="text-sm text-[hsl(var(--foreground-secondary))] mt-0.5">
+              {t('weeklyGoalProgress', { percent: d.weeklyGoalProgress })}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Streak */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[hsl(var(--secondary-light))] text-[hsl(var(--secondary))]">
+              <Flame className="w-4 h-4" />
+              <span className="text-sm font-semibold">{d.streak}</span>
+              <span className="text-xs hidden sm:inline">day streak</span>
+            </div>
+            {/* XP */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[hsl(var(--level-bg))]">
+              <Star className="w-4 h-4 text-[hsl(var(--xp))] fill-[hsl(var(--xp))]" />
+              <span className="text-sm font-semibold text-[hsl(var(--foreground))]">+{d.todayXP}</span>
+              <span className="text-xs text-[hsl(var(--foreground-secondary))] hidden sm:inline">today</span>
+            </div>
+            {/* Weekly progress ring */}
+            <div className="relative w-10 h-10">
+              <svg viewBox="0 0 44 44" className="w-10 h-10 -rotate-90">
+                <circle cx="22" cy="22" r="18" fill="none" stroke="hsl(var(--muted))" strokeWidth="3.5" />
+                <circle
+                  cx="22" cy="22" r="18" fill="none"
+                  stroke="hsl(var(--primary))" strokeWidth="3.5"
+                  strokeDasharray={`${(d.weeklyGoalProgress / 100) * 113.1} 113.1`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[hsl(var(--primary))]">
+                {d.weeklyGoalProgress}%
+              </span>
+            </div>
+          </div>
+        </div>
 
 
         {/* Main Grid */}

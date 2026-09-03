@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useTheme } from 'next-themes';
+import { useRouter } from 'next/navigation';
 import {
   Menu,
   X,
-  Search,
   Sun,
   Moon,
   Globe,
@@ -18,6 +18,13 @@ import {
   ChevronDown,
   Wifi,
   WifiOff,
+  User,
+  LayoutDashboard,
+  Settings,
+  LogOut,
+  Flame,
+  Star,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useBandwidth } from '@/components/providers/bandwidth-provider';
@@ -35,7 +42,47 @@ export function Header() {
   const tCommon = useTranslations('common');
   const { theme, setTheme } = useTheme();
   const { dataSaver, toggleDataSaver } = useBandwidth();
+  const router = useRouter();
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState<{ full_name?: string; email?: string; grade?: string }>({
+    full_name: 'Aarav Sharma',
+    email: 'aarav@gmail.com',
+    grade: 'Grade 8',
+  });
+
+  useEffect(() => {
+    // Check if session cookie or stored user exists
+    const hasCookie = typeof document !== 'undefined' && document.cookie.includes('padhai_session');
+    if (hasCookie) {
+      setIsLoggedIn(true);
+      try {
+        const stored = localStorage.getItem('padhai_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setUser(prev => ({ ...prev, ...parsed }));
+        }
+      } catch {
+        // Fallback
+      }
+    }
+  }, []);
+
+  const handleSignOut = () => {
+    document.cookie = "padhai_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = "padhai_verified=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('padhai_user');
+    }
+    setIsLoggedIn(false);
+    setProfileDropdownOpen(false);
+    router.push('/login');
+    router.refresh();
+  };
+
+  const userInitial = user.full_name ? user.full_name.charAt(0).toUpperCase() : 'A';
 
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] border-b border-[hsl(var(--border))] bg-[hsl(var(--background)/0.85)] backdrop-blur-xl">
@@ -101,21 +148,106 @@ export function Header() {
               <span className="text-xs font-medium">EN</span>
             </button>
 
-            {/* Auth Buttons */}
-            <div className="hidden sm:flex items-center gap-2 ml-1">
-              <Link
-                href="/dashboard"
-                className="px-3.5 py-2 text-sm font-semibold text-[hsl(var(--primary))] bg-[hsl(var(--primary-light))] rounded-lg hover:bg-[hsl(var(--primary)/0.15)] transition-colors"
-              >
-                {t('dashboard')}
-              </Link>
-              <Link
-                href="/register"
-                className="px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] bg-[hsl(var(--primary))] rounded-lg hover:bg-[hsl(var(--primary-hover))] transition-colors shadow-sm"
-              >
-                {tCommon('signUp')}
-              </Link>
-            </div>
+            {/* User Profile Icon Dropdown (When Logged In) */}
+            {isLoggedIn ? (
+              <div className="relative ml-1">
+                <button
+                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                  className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.4)] hover:bg-[hsl(var(--muted))] transition-all shadow-xs"
+                  aria-label="User Account Menu"
+                  aria-expanded={profileDropdownOpen}
+                >
+                  <div className="w-7 h-7 rounded-full bg-[hsl(var(--primary))] text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                    {userInitial}
+                  </div>
+                  <span className="text-xs font-semibold text-[hsl(var(--foreground))] hidden sm:inline max-w-[100px] truncate">
+                    {user.full_name || 'Account'}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-[hsl(var(--foreground-tertiary))]" />
+                </button>
+
+                {/* Account Dropdown Menu */}
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] shadow-xl py-2 z-[var(--z-popover)] animate-fade-in">
+                    {/* User Header */}
+                    <div className="px-4 py-2.5 border-b border-[hsl(var(--border))]">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-[hsl(var(--foreground))] truncate">
+                          {user.full_name || 'Student'}
+                        </p>
+                        <ShieldCheck className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
+                      </div>
+                      <p className="text-[11px] text-[hsl(var(--foreground-tertiary))] truncate">
+                        {user.email || 'aarav@gmail.com'}
+                      </p>
+                    </div>
+
+                    {/* Quick Links */}
+                    <div className="py-1">
+                      <Link
+                        href="/dashboard"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                      >
+                        <LayoutDashboard className="w-4 h-4 text-[hsl(var(--primary))]" />
+                        Dashboard
+                      </Link>
+                      <Link
+                        href="/courses"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                      >
+                        <BookOpen className="w-4 h-4 text-[hsl(var(--primary))]" />
+                        My Courses
+                      </Link>
+                      <Link
+                        href="/practice"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                      >
+                        <Brain className="w-4 h-4 text-[hsl(var(--accent))]" />
+                        Practice & Quizzes
+                      </Link>
+                      <Link
+                        href="/settings"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                      >
+                        <Settings className="w-4 h-4 text-[hsl(var(--foreground-secondary))]" />
+                        Settings
+                      </Link>
+                    </div>
+
+                    <div className="border-t border-[hsl(var(--border))] my-1" />
+
+                    {/* Sign Out */}
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive-light))] transition-colors text-left"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Auth Buttons (When Not Logged In) */
+              <div className="hidden sm:flex items-center gap-2 ml-1">
+                <Link
+                  href="/login"
+                  className="px-4 py-2 text-sm font-medium text-[hsl(var(--foreground-secondary))] hover:text-[hsl(var(--foreground))] rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
+                >
+                  {tCommon('signIn')}
+                </Link>
+                <Link
+                  href="/register"
+                  className="px-4 py-2 text-sm font-semibold text-[hsl(var(--primary-foreground))] bg-[hsl(var(--primary))] rounded-lg hover:bg-[hsl(var(--primary-hover))] transition-colors shadow-sm"
+                >
+                  {tCommon('signUp')}
+                </Link>
+              </div>
+            )}
 
             {/* Mobile Menu */}
             <button
@@ -157,25 +289,34 @@ export function Header() {
                   {dataSaver ? <WifiOff className="w-4 h-4" /> : <Wifi className="w-4 h-4" />}
                   {tCommon('dataSaver')}
                 </button>
-                <button
-                  className="flex items-center gap-1.5 text-sm text-[hsl(var(--foreground-secondary))]"
-                >
+                <button className="flex items-center gap-1.5 text-sm text-[hsl(var(--foreground-secondary))]">
                   <Globe className="w-4 h-4" />
                   EN / ने
                 </button>
               </div>
-              <Link
-                href="/login"
-                className="mx-3 px-4 py-2.5 text-center text-sm font-medium border border-[hsl(var(--border))] rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
-              >
-                {tCommon('signIn')}
-              </Link>
-              <Link
-                href="/register"
-                className="mx-3 px-4 py-2.5 text-center text-sm font-semibold text-[hsl(var(--primary-foreground))] bg-[hsl(var(--primary))] rounded-lg hover:bg-[hsl(var(--primary-hover))] transition-colors"
-              >
-                {tCommon('signUp')}
-              </Link>
+              {isLoggedIn ? (
+                <button
+                  onClick={handleSignOut}
+                  className="mx-3 px-4 py-2.5 text-center text-sm font-semibold text-[hsl(var(--destructive))] border border-[hsl(var(--destructive)/0.2)] rounded-lg hover:bg-[hsl(var(--destructive-light))] transition-colors"
+                >
+                  Sign Out ({user.full_name})
+                </button>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="mx-3 px-4 py-2.5 text-center text-sm font-medium border border-[hsl(var(--border))] rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
+                  >
+                    {tCommon('signIn')}
+                  </Link>
+                  <Link
+                    href="/register"
+                    className="mx-3 px-4 py-2.5 text-center text-sm font-semibold text-[hsl(var(--primary-foreground))] bg-[hsl(var(--primary))] rounded-lg hover:bg-[hsl(var(--primary-hover))] transition-colors"
+                  >
+                    {tCommon('signUp')}
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         )}
