@@ -1,0 +1,11 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /teacher/
+Disallow: /parent/
+Disallow: /settings
+Disallow: /onboarding
+
+Sitemap: https://padhai.com.np/sitemap.xml
