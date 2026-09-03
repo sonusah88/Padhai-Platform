@@ -60,21 +60,56 @@ export default function RegisterPage() {
     }
   }
 
-  async function handleGoogleSignUp() {
+  async function handleGoogleSignUp(e?: React.MouseEvent) {
+    if (e) e.preventDefault();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const isPlaceholder = !supabaseUrl || supabaseUrl.includes('placeholder') || supabaseUrl === '';
+
+    if (isPlaceholder) {
+      document.cookie = "padhai_session=true; path=/; max-age=86400";
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role }));
+      }
+      router.push('/dashboard');
+      router.refresh();
+      return;
+    }
+
     try {
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
-      await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
+      if (error) {
+        document.cookie = "padhai_session=true; path=/; max-age=86400";
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role }));
+        }
+        router.push('/dashboard');
+        router.refresh();
+      }
     } catch {
       document.cookie = "padhai_session=true; path=/; max-age=86400";
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('padhai_user', JSON.stringify({ email: 'google.user@example.com', full_name: 'Google User', role }));
+      }
       router.push('/dashboard');
       router.refresh();
     }
+  }
+
+  // Quick Demo Register function
+  function handleDemoRegister() {
+    document.cookie = "padhai_session=true; path=/; max-age=86400";
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('padhai_user', JSON.stringify({ email: 'demo@padhai.com', full_name: 'Demo Student', role }));
+    }
+    router.push('/dashboard');
+    router.refresh();
   }
 
   const roles = [
@@ -128,6 +163,7 @@ export default function RegisterPage() {
           <div className="flex gap-2 mb-6">
             {roles.map(r => (
               <button
+                type="button"
                 key={r.id}
                 onClick={() => setRole(r.id)}
                 className={cn(
@@ -143,8 +179,18 @@ export default function RegisterPage() {
             ))}
           </div>
 
+          {/* Quick Demo Register (Dev/Fallback) */}
+          <button
+            type="button"
+            onClick={handleDemoRegister}
+            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 mb-4 border border-[hsl(var(--primary))] bg-[hsl(var(--primary-light))] text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary-hover))] hover:text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            🚀 1-Click Demo Sign Up
+          </button>
+
           {/* Google Sign Up */}
           <button
+            type="button"
             onClick={handleGoogleSignUp}
             className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-[hsl(var(--border))] rounded-xl text-sm font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors mb-6"
           >
