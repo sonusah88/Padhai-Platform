@@ -287,5 +287,17 @@
     "unauthorizedDesc": "Please sign in to access this page.",
     "goHome": "Go home",
     "goBack": "Go back"
+  },
+  "admin": {
+    "title": "Admin & Management Portal",
+    "overview": "Overview & Analytics",
+    "users": "User & Role Management",
+    "liveClasses": "Live Classes (Zoom)",
+    "content": "VOD & Study Materials",
+    "quizzes": "Dynamic Quiz Builder",
+    "scheduleClass": "Schedule Zoom Class",
+    "uploadVideo": "Upload Video Lecture",
+    "uploadMaterial": "Upload Study PDF",
+    "createQuiz": "Create New Quiz"
   }
 }

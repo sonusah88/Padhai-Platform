@@ -35,10 +35,14 @@ interface LiveChatPanelProps {
 export function LiveChatPanel({
   currentUserName,
   currentUserRole,
+  sessionId,
 }: LiveChatPanelProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'qa'>('chat');
   const [inputText, setInputText] = useState('');
   const [isQuestionMode, setIsQuestionMode] = useState(false);
+  const [answeringMsgId, setAnsweringMsgId] = useState<string | null>(null);
+  const [answerInputText, setAnswerInputText] = useState('');
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'm1',
@@ -89,6 +93,37 @@ export function LiveChatPanel({
   ]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+  // Initialize BroadcastChannel for instant cross-window sync
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel(`padhai_live_${sessionId}`);
+        broadcastChannelRef.current = channel;
+
+        channel.onmessage = (event) => {
+          const data = event.data;
+          if (data && data.type === 'chat-message') {
+            const incomingMsg: ChatMessage = data.payload;
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === incomingMsg.id)) return prev;
+              return [...prev, incomingMsg];
+            });
+          } else if (data && data.type === 'chat-update') {
+            const update = data.payload;
+            setMessages((prev) =>
+              prev.map((msg) => (msg.id === update.id ? { ...msg, ...update } : msg))
+            );
+          }
+        };
+
+        return () => {
+          channel.close();
+        };
+      } catch {}
+    }
+  }, [sessionId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -103,8 +138,8 @@ export function LiveChatPanel({
     if (!inputText.trim()) return;
 
     const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: currentUserName + (currentUserRole === 'teacher' ? ' (Teacher)' : ''),
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      sender: currentUserName + (currentUserRole === 'teacher' && !currentUserName.includes('Teacher') ? ' (Teacher)' : ''),
       role: currentUserRole,
       avatar: currentUserRole === 'teacher'
         ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250'
@@ -119,6 +154,28 @@ export function LiveChatPanel({
     setMessages((prev) => [...prev, newMsg]);
     setInputText('');
     setIsQuestionMode(false);
+
+    // Broadcast message to other tabs
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({
+        type: 'chat-message',
+        payload: newMsg,
+        senderId: 'chat',
+        senderName: currentUserName,
+        timestamp: Date.now(),
+      });
+    }
+
+    // Also send to API
+    fetch('/api/live/signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        type: 'chat-message',
+        payload: newMsg,
+      }),
+    }).catch(() => {});
   };
 
   const handleUpvote = (id: string) => {
@@ -126,9 +183,22 @@ export function LiveChatPanel({
       prev.map((msg) => {
         if (msg.id === id) {
           const hasUpvoted = msg.hasUpvoted;
+          const newUpvotes = (msg.upvotes || 0) + (hasUpvoted ? -1 : 1);
+          const updatePayload = { id, upvotes: newUpvotes };
+
+          if (broadcastChannelRef.current) {
+            broadcastChannelRef.current.postMessage({
+              type: 'chat-update',
+              payload: updatePayload,
+              senderId: 'chat',
+              senderName: currentUserName,
+              timestamp: Date.now(),
+            });
+          }
+
           return {
             ...msg,
-            upvotes: (msg.upvotes || 0) + (hasUpvoted ? -1 : 1),
+            upvotes: newUpvotes,
             hasUpvoted: !hasUpvoted,
           };
         }
@@ -137,10 +207,25 @@ export function LiveChatPanel({
     );
   };
 
-  const handleAnswerQuestion = (id: string, answerText: string) => {
+  const submitAnswer = (id: string) => {
+    if (!answerInputText.trim()) return;
+    const answerText = answerInputText.trim();
+
     setMessages((prev) =>
       prev.map((msg) => {
         if (msg.id === id) {
+          const updatePayload = { id, isAnswered: true, answer: answerText };
+
+          if (broadcastChannelRef.current) {
+            broadcastChannelRef.current.postMessage({
+              type: 'chat-update',
+              payload: updatePayload,
+              senderId: 'chat',
+              senderName: currentUserName,
+              timestamp: Date.now(),
+            });
+          }
+
           return {
             ...msg,
             isAnswered: true,
@@ -150,6 +235,9 @@ export function LiveChatPanel({
         return msg;
       })
     );
+
+    setAnsweringMsgId(null);
+    setAnswerInputText('');
   };
 
   const filteredMessages = activeTab === 'qa'
@@ -183,7 +271,7 @@ export function LiveChatPanel({
             )}
           >
             <HelpCircle className="w-3.5 h-3.5 text-[hsl(var(--secondary))]" />
-            <span>Q&A</span>
+            <span>Q&amp;A</span>
             <span className="w-4 h-4 rounded-full bg-[hsl(var(--secondary)/0.15)] text-[hsl(var(--secondary))] text-[10px] flex items-center justify-center font-bold">
               {messages.filter((m) => m.isQuestion && !m.isAnswered).length}
             </span>
@@ -251,60 +339,78 @@ export function LiveChatPanel({
                     {msg.sender}
                   </span>
                   {msg.isQuestion && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[hsl(var(--secondary))] text-white">
-                      Question
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[hsl(var(--secondary)/0.2)] text-[hsl(var(--secondary))]">
+                      QUESTION
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] text-[hsl(var(--foreground-tertiary))]">
-                  {msg.timestamp}
-                </span>
+                <span className="text-[10px] text-[hsl(var(--foreground-tertiary))]">{msg.timestamp}</span>
               </div>
 
-              <p className="text-xs text-[hsl(var(--foreground))] pl-7 leading-relaxed whitespace-pre-wrap">
-                {msg.text}
-              </p>
+              <p className="text-[hsl(var(--foreground))] leading-relaxed pl-7">{msg.text}</p>
 
-              {/* Question Upvotes & Answer Box */}
+              {/* Question Upvote & Answers */}
               {msg.isQuestion && (
-                <div className="pl-7 mt-1.5 space-y-2">
+                <div className="mt-1 pl-7 flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => handleUpvote(msg.id)}
                       className={cn(
-                        'flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
+                        'flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors',
                         msg.hasUpvoted
-                          ? 'bg-[hsl(var(--secondary))] text-white border-[hsl(var(--secondary))]'
-                          : 'bg-[hsl(var(--card))] text-[hsl(var(--foreground-secondary))] border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]'
+                          ? 'bg-[hsl(var(--secondary)/0.15)] text-[hsl(var(--secondary))] border-[hsl(var(--secondary)/0.3)]'
+                          : 'bg-[hsl(var(--muted))] text-[hsl(var(--foreground-secondary))] border-[hsl(var(--border))] hover:bg-[hsl(var(--muted)/0.8)]'
                       )}
                     >
                       <ThumbsUp className="w-3 h-3" />
-                      <span>{msg.upvotes || 0} Upvotes</span>
+                      <span>{msg.upvotes || 0} Helpful</span>
                     </button>
 
                     {msg.isAnswered ? (
-                      <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                        <CheckCircle className="w-3 h-3" /> Answered
+                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Answered</span>
                       </span>
+                    ) : currentUserRole === 'teacher' ? (
+                      <button
+                        onClick={() => setAnsweringMsgId(answeringMsgId === msg.id ? null : msg.id)}
+                        className="text-[11px] font-semibold text-[hsl(var(--primary))] hover:underline"
+                      >
+                        {answeringMsgId === msg.id ? 'Cancel' : 'Reply Answer'}
+                      </button>
                     ) : (
-                      currentUserRole === 'teacher' && (
-                        <button
-                          onClick={() => {
-                            const ans = prompt('Write teacher answer for this question:');
-                            if (ans) handleAnswerQuestion(msg.id, ans);
-                          }}
-                          className="text-[11px] font-semibold text-[hsl(var(--primary))] hover:underline"
-                        >
-                          Reply as Teacher
-                        </button>
-                      )
+                      <span className="text-[11px] text-[hsl(var(--foreground-tertiary))]">Pending Answer</span>
                     )}
                   </div>
 
+                  {/* Teacher's Official Answer Bubble */}
                   {msg.isAnswered && msg.answer && (
-                    <div className="p-2 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-[11px] text-[hsl(var(--foreground))]">
-                      <span className="font-semibold text-[hsl(var(--primary))]">Teacher Answer: </span>
-                      {msg.answer}
+                    <div className="p-2.5 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-xs text-[hsl(var(--foreground))] space-y-1">
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-[hsl(var(--primary))]">
+                        <Sparkles className="w-3 h-3" />
+                        <span>Teacher&apos;s Answer</span>
+                      </div>
+                      <p>{msg.answer}</p>
+                    </div>
+                  )}
+
+                  {/* Inline Reply Input for Teacher */}
+                  {answeringMsgId === msg.id && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        placeholder="Type answer to this doubt..."
+                        value={answerInputText}
+                        onChange={(e) => setAnswerInputText(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && submitAnswer(msg.id)}
+                        className="flex-1 px-3 py-1.5 rounded-lg bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-xs focus:outline-hidden focus:border-[hsl(var(--primary))]"
+                      />
+                      <button
+                        onClick={() => submitAnswer(msg.id)}
+                        className="px-3 py-1.5 rounded-lg bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] font-semibold text-xs"
+                      >
+                        Post
+                      </button>
                     </div>
                   )}
                 </div>
@@ -315,52 +421,49 @@ export function LiveChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <form
-        onSubmit={handleSendMessage}
-        className="p-3 border-t border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.3)] flex flex-col gap-2"
-      >
-        <div className="flex items-center justify-between text-[11px]">
+      {/* Message Input Footer */}
+      <div className="p-3 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] space-y-2">
+        <div className="flex items-center justify-between">
           <button
             type="button"
             onClick={() => setIsQuestionMode(!isQuestionMode)}
             className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors font-medium',
+              'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors',
               isQuestionMode || activeTab === 'qa'
-                ? 'bg-[hsl(var(--secondary))] text-white'
-                : 'text-[hsl(var(--foreground-secondary))] hover:bg-[hsl(var(--muted))]'
+                ? 'bg-[hsl(var(--secondary)/0.15)] text-[hsl(var(--secondary))] border border-[hsl(var(--secondary)/0.3)]'
+                : 'bg-[hsl(var(--muted))] text-[hsl(var(--foreground-secondary))] hover:text-[hsl(var(--foreground))]'
             )}
           >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>{isQuestionMode || activeTab === 'qa' ? 'Asking Question' : 'Ask a Question'}</span>
+            <HelpCircle className="w-3 h-3" />
+            <span>{isQuestionMode || activeTab === 'qa' ? 'Asking Question / Doubt' : 'Ask Question'}</span>
           </button>
 
-          <span className="text-[10px] text-[hsl(var(--foreground-tertiary))]">
-            Press Enter ↵ to send
-          </span>
+          <span className="text-[10px] text-[hsl(var(--foreground-tertiary))]">Press Enter to send</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
           <input
             type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
             placeholder={
               isQuestionMode || activeTab === 'qa'
-                ? 'Type your question for the teacher...'
-                : 'Send message in live class...'
+                ? 'Type your doubt/question to the teacher...'
+                : 'Send message to class...'
             }
-            className="flex-1 bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg px-3.5 py-2 text-xs text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-tertiary))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            className="flex-1 px-3.5 py-2 rounded-xl bg-[hsl(var(--muted)/0.6)] border border-[hsl(var(--border))] text-xs text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-tertiary))] focus:outline-hidden focus:border-[hsl(var(--primary))] transition-colors"
           />
+
           <button
             type="submit"
             disabled={!inputText.trim()}
-            className="p-2 bg-[hsl(var(--primary))] text-white rounded-lg hover:bg-[hsl(var(--primary-hover))] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2.5 rounded-xl bg-[hsl(var(--primary))] hover:bg-[hsl(var(--primary-hover))] disabled:opacity-40 disabled:cursor-not-allowed text-[hsl(var(--primary-foreground))] transition-all shrink-0"
+            title="Send"
           >
             <Send className="w-4 h-4" />
           </button>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

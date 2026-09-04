@@ -453,3 +453,130 @@ export interface StudentDashboard {
   };
   recent_xp: number;
 }
+
+// -- Admin & Content Management Types --
+
+export interface RecordedVideo {
+  id: string;
+  title: string;
+  description: string | null;
+  video_url: string;
+  thumbnail_url: string | null;
+  duration_seconds: number;
+  subject_id: string | null;
+  grade_id: string | null;
+  course_id: string | null;
+  uploaded_by: string | null;
+  status: 'draft' | 'review' | 'published' | 'archived';
+  views_count: number;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  subject?: Subject;
+  grade?: Grade;
+  uploader?: Profile;
+}
+
+export interface StudyMaterial {
+  id: string;
+  title: string;
+  description: string | null;
+  file_url: string;
+  file_size_bytes: number | null;
+  file_type: string;
+  subject_id: string | null;
+  grade_id: string | null;
+  course_id: string | null;
+  uploaded_by: string | null;
+  download_count: number;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  subject?: Subject;
+  grade?: Grade;
+  uploader?: Profile;
+}
+
+export interface QuizQuestionOption {
+  id: string;
+  text: string;
+  is_correct: boolean;
+}
+
+export interface QuizQuestion {
+  id: string;
+  text: string;
+  options: QuizQuestionOption[];
+  correct_answer?: string;
+  explanation?: string;
+  marks: number;
+}
+
+export interface Quiz {
+  id: string;
+  title: string;
+  description: string | null;
+  subject_id: string | null;
+  grade_id: string | null;
+  time_limit_minutes: number;
+  total_marks: number;
+  pass_percentage: number;
+  questions: QuizQuestion[];
+  created_by: string | null;
+  status: 'draft' | 'published' | 'archived';
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  subject?: Subject;
+  grade?: Grade;
+  creator?: Profile;
+}
+
+export interface LiveClassItem {
+  id: string;
+  title: string;
+  topic: string | null;
+  description: string | null;
+  subject_id: string | null;
+  grade_id: string | null;
+  teacher_id: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  meeting_id: string;
+  passcode: string;
+  status: 'scheduled' | 'live' | 'ended' | 'cancelled';
+  recording_url: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  subject?: Subject;
+  grade?: Grade;
+  teacher?: Profile;
+}
+
+export interface AdminUserItem {
+  id: string;
+  user_id: string;
+  full_name: string;
+  email?: string;
+  avatar_url: string | null;
+  role: UserRole;
+  grade_id: string | null;
+  school: string | null;
+  district: string | null;
+  xp: number;
+  level: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  totalStudents: number;
+  totalTeachers: number;
+  totalLiveClasses: number;
+  totalVideos: number;
+  totalMaterials: number;
+  totalQuizzes: number;
+  activeLiveNow: number;
+}
