@@ -78,6 +78,7 @@ export function ZoomEmbeddedMeeting({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [remoteWhiteboardEvent, setRemoteWhiteboardEvent] = useState<any>(null);
   const [hasAutoplayBlocked, setHasAutoplayBlocked] = useState(false);
+  const [remoteStreamKey, setRemoteStreamKey] = useState(0);
 
   // Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -127,9 +128,11 @@ export function ZoomEmbeddedMeeting({
 
     // Student receives remote WebRTC stream
     manager.onRemoteStream((stream, streamType) => {
+      console.log('[Padhai UI] Remote stream received:', stream.id, 'tracks:', stream.getTracks().map(t => `${t.kind}:${t.readyState}`).join(','));
       setRemoteStream(stream);
       setIsHostBroadcasting(true);
       setHostStreamType(streamType as any);
+      setRemoteStreamKey(k => k + 1); // force re-render to re-bind video element
     });
 
     // Student receives whiteboard drawing
@@ -163,19 +166,28 @@ export function ZoomEmbeddedMeeting({
     }
   }, [isVideoOn, viewMode]);
 
-  // Sync remote host stream to student video element
-  useEffect(() => {
-    if (remoteStream && remoteHostVideoRef.current) {
-      remoteHostVideoRef.current.srcObject = remoteStream;
-      remoteHostVideoRef.current
-        .play()
-        .then(() => setHasAutoplayBlocked(false))
-        .catch((err) => {
-          console.warn('Student video autoplay blocked, prompting user gesture:', err);
-          setHasAutoplayBlocked(true);
-        });
-    }
-  }, [remoteStream, isHostBroadcasting, hostStreamType, viewMode]);
+  // Callback ref for the remote host video element.
+  // This fires every time the <video> mounts into the DOM and immediately
+  // binds the remoteStream, avoiding the timing bug where a useEffect runs
+  // before the conditionally-rendered video element exists.
+  const bindRemoteVideo = useCallback(
+    (el: HTMLVideoElement | null) => {
+      remoteHostVideoRef.current = el;
+      if (el && remoteStream) {
+        if (el.srcObject !== remoteStream) {
+          console.log('[Padhai UI] Binding remote stream to <video>', remoteStream.id);
+          el.srcObject = remoteStream;
+        }
+        el.play()
+          .then(() => setHasAutoplayBlocked(false))
+          .catch((err) => {
+            console.warn('[Padhai UI] Autoplay blocked:', err);
+            setHasAutoplayBlocked(true);
+          });
+      }
+    },
+    [remoteStream, remoteStreamKey]
+  );
 
   // Fetch Zoom signature
   useEffect(() => {
@@ -573,7 +585,8 @@ export function ZoomEmbeddedMeeting({
               /* STUDENT SEES TEACHER'S LIVE SHARED SCREEN OR WEBCAM BROADCAST */
               <div className="relative w-full h-full max-w-5xl rounded-xl bg-black border-2 border-emerald-500/80 flex items-center justify-center overflow-hidden shadow-2xl">
                 <video
-                  ref={remoteHostVideoRef}
+                  key={`remote-main-${remoteStreamKey}`}
+                  ref={bindRemoteVideo}
                   autoPlay
                   playsInline
                   className="w-full h-full object-contain"
@@ -621,7 +634,13 @@ export function ZoomEmbeddedMeeting({
                 />
               ) : isHostBroadcasting && userRole === 'student' && hostStreamType === 'screen' && remoteStream ? (
                 <video
-                  ref={remoteHostVideoRef}
+                  key={`remote-pip-${remoteStreamKey}`}
+                  ref={(el) => {
+                    if (el && remoteStream && el.srcObject !== remoteStream) {
+                      el.srcObject = remoteStream;
+                      el.play().catch(() => {});
+                    }
+                  }}
                   autoPlay
                   playsInline
                   className="w-full h-full object-cover"
@@ -663,7 +682,13 @@ export function ZoomEmbeddedMeeting({
             <div className="relative rounded-xl bg-slate-900 border-2 border-emerald-500 overflow-hidden shadow-lg aspect-video">
               {isHostBroadcasting && userRole === 'student' && remoteStream ? (
                 <video
-                  ref={remoteHostVideoRef}
+                  key={`remote-grid-${remoteStreamKey}`}
+                  ref={(el) => {
+                    if (el && remoteStream && el.srcObject !== remoteStream) {
+                      el.srcObject = remoteStream;
+                      el.play().catch(() => {});
+                    }
+                  }}
                   autoPlay
                   playsInline
                   className="w-full h-full object-cover"

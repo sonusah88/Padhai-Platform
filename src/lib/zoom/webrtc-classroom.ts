@@ -1,5 +1,18 @@
 'use client';
 
+/**
+ * WebRTCClassroomManager — Handles real-time peer-to-peer media streaming
+ * between teacher (host) and student tabs using:
+ *   1. BroadcastChannel for instant same-browser signaling
+ *   2. Server polling (/api/live/signal) as cross-machine fallback
+ *   3. RTCPeerConnection for actual media track transfer
+ *
+ * Key design decisions:
+ *   - All ICE candidates are serialized via toJSON() before BroadcastChannel
+ *   - Candidates are buffered until remote description is set (race condition fix)
+ *   - Offer/answer SDP objects are plain {type, sdp} — no class instances
+ */
+
 export interface ClassroomEvent {
   type: 'whiteboard-stroke' | 'whiteboard-clear' | 'chat-message' | 'chat-update' | 'reaction' | 'host-stream' | 'hand-raise' | 'sdp-offer' | 'sdp-answer' | 'ice-candidate';
   payload: any;
@@ -17,6 +30,27 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
+/**
+ * Serialize an RTCIceCandidate to a plain JSON-safe object.
+ * RTCIceCandidate class instances can NOT be passed through
+ * BroadcastChannel.postMessage (DataCloneError).
+ */
+function serializeCandidate(candidate: RTCIceCandidate): RTCIceCandidateInit {
+  return {
+    candidate: candidate.candidate,
+    sdpMid: candidate.sdpMid,
+    sdpMLineIndex: candidate.sdpMLineIndex,
+    usernameFragment: candidate.usernameFragment,
+  };
+}
+
+/**
+ * Serialize an RTCSessionDescription(Init) to a plain object.
+ */
+function serializeSdp(sdp: RTCSessionDescriptionInit): RTCSessionDescriptionInit {
+  return { type: sdp.type, sdp: sdp.sdp };
+}
+
 export class WebRTCClassroomManager {
   public sessionId: string;
   public peerId: string;
@@ -28,6 +62,11 @@ export class WebRTCClassroomManager {
   private localStream: MediaStream | null = null;
   private isBroadcasting = false;
   private currentStreamType: 'webcam' | 'screen' | 'none' = 'none';
+
+  // ICE candidate buffer — stores candidates that arrive before remoteDescription is set
+  private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  // Guard against duplicate offer processing
+  private isNegotiating = false;
 
   private onRemoteStreamCallback: ((stream: MediaStream, streamType: string) => void) | null = null;
   private onWhiteboardEventCallback: ((event: any) => void) | null = null;
@@ -48,7 +87,7 @@ export class WebRTCClassroomManager {
     this.userName = userName;
     this.peerId = `peer_${role}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    // Initialize BroadcastChannel for instant same-browser cross-window sync
+    // BroadcastChannel for instant same-browser cross-window sync
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
         this.broadcastChannel = new BroadcastChannel(`padhai_live_${sessionId}`);
@@ -56,15 +95,18 @@ export class WebRTCClassroomManager {
           this.handleBroadcastMessage(event.data);
         };
       } catch (err) {
-        console.warn('BroadcastChannel error:', err);
+        console.warn('[Padhai] BroadcastChannel init error:', err);
       }
     }
 
-    // Start background signaling poll
+    // Background signaling poll (server fallback for cross-machine)
     this.startSignalingPoll();
+
+    console.log(`[Padhai WebRTC] Init: role=${role}, peer=${this.peerId}, session=${sessionId}`);
   }
 
-  // Set callbacks
+  // ─── Callback Setters ──────────────────────────────────────────────
+
   public onRemoteStream(cb: (stream: MediaStream, streamType: string) => void) {
     this.onRemoteStreamCallback = cb;
   }
@@ -87,11 +129,19 @@ export class WebRTCClassroomManager {
     this.onParticipantsCallback = cb;
   }
 
-  // Teacher starts broadcasting webcam or screen share
+  // ─── Teacher: Start Broadcasting ───────────────────────────────────
+
   public async startBroadcasting(stream: MediaStream, streamType: 'webcam' | 'screen') {
+    // Close any existing peer connections from previous broadcast
+    this.peerConnections.forEach((pc) => { try { pc.close(); } catch {} });
+    this.peerConnections.clear();
+    this.pendingCandidates.clear();
+
     this.localStream = stream;
     this.isBroadcasting = true;
     this.currentStreamType = streamType;
+
+    console.log(`[Padhai WebRTC] Teacher: startBroadcasting type=${streamType}, tracks=${stream.getTracks().map(t => t.kind).join(',')}`);
 
     const statusPayload = {
       active: true,
@@ -99,7 +149,7 @@ export class WebRTCClassroomManager {
       teacherName: this.userName,
     };
 
-    // Broadcast status to all tabs/peers immediately
+    // 1. Broadcast status immediately so student UI shows "Teacher broadcasting"
     this.sendBroadcast({
       type: 'host-stream',
       payload: statusPayload,
@@ -108,14 +158,18 @@ export class WebRTCClassroomManager {
       timestamp: Date.now(),
     });
 
-    // Notify server
-    this.sendSignal('host-stream-status', statusPayload);
+    // 2. Notify server
+    await this.sendSignal('host-stream-status', statusPayload);
 
-    // Create WebRTC offers for all known student peers or broadcast offer
-    this.createOffersForStudents();
+    // 3. Small delay to let student tabs register status before receiving offer
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // 4. Create WebRTC offer
+    await this.createOfferForPeer('broadcast');
   }
 
-  // Teacher stops broadcasting
+  // ─── Teacher: Stop Broadcasting ────────────────────────────────────
+
   public stopBroadcasting() {
     this.isBroadcasting = false;
     this.localStream = null;
@@ -137,72 +191,71 @@ export class WebRTCClassroomManager {
 
     this.sendSignal('host-stream-status', statusPayload);
 
-    // Close peer connections
-    this.peerConnections.forEach((pc) => {
-      try {
-        pc.close();
-      } catch {}
-    });
+    this.peerConnections.forEach((pc) => { try { pc.close(); } catch {} });
     this.peerConnections.clear();
+    this.pendingCandidates.clear();
   }
 
-  // Send offers to connected student peers
-  private async createOffersForStudents(targetStudentId?: string) {
-    if (!this.localStream || !this.isBroadcasting) return;
-
-    if (targetStudentId) {
-      await this.createOfferForPeer(targetStudentId);
-    } else {
-      // General offer for all students
-      await this.createOfferForPeer('all');
-      // Also for all known specific students
-      this.knownParticipantIds.forEach((pid) => {
-        this.createOfferForPeer(pid);
-      });
-    }
-  }
+  // ─── Teacher: Create SDP Offer ─────────────────────────────────────
 
   private async createOfferForPeer(targetId: string) {
     try {
-      if (!this.localStream) return;
-
-      let pc = this.peerConnections.get(targetId);
-      if (pc) {
-        try {
-          pc.close();
-        } catch {}
+      if (!this.localStream) {
+        console.warn('[Padhai WebRTC] createOfferForPeer: no local stream');
+        return;
       }
 
-      pc = new RTCPeerConnection(ICE_SERVERS);
-      this.peerConnections.set(targetId, pc);
+      // Close existing PC for this target
+      const existing = this.peerConnections.get(targetId);
+      if (existing) {
+        try { existing.close(); } catch {}
+        this.peerConnections.delete(targetId);
+      }
 
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      this.peerConnections.set(targetId, pc);
+      this.pendingCandidates.set(targetId, []);
+
+      // Add all media tracks to the peer connection
       this.localStream.getTracks().forEach((track) => {
-        if (this.localStream && pc) {
-          pc.addTrack(track, this.localStream);
-        }
+        pc.addTrack(track, this.localStream!);
       });
 
+      console.log(`[Padhai WebRTC] Teacher: creating offer for "${targetId}"`);
+
+      // ICE candidate handler — serialize before broadcast!
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          const candPayload = { candidate: event.candidate, targetPeerId: targetId };
+          const serialized = serializeCandidate(event.candidate);
           this.sendBroadcast({
             type: 'ice-candidate',
-            payload: candPayload,
+            payload: { candidate: serialized, fromPeerId: this.peerId },
             senderId: this.peerId,
             senderName: this.userName,
             targetId,
             timestamp: Date.now(),
           });
-          this.sendSignal('ice-candidate', candPayload);
+          this.sendSignal('ice-candidate', { candidate: serialized, fromPeerId: this.peerId, targetPeerId: targetId });
         }
       };
 
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[Padhai WebRTC] Teacher PC iceConnectionState: ${pc.iceConnectionState}`);
+      };
+      pc.onconnectionstatechange = () => {
+        console.log(`[Padhai WebRTC] Teacher PC connectionState: ${pc.connectionState}`);
+      };
+
+      // Create & set local description
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const offerPayload = { offer, targetPeerId: targetId, streamType: this.currentStreamType };
+      const plainOffer = serializeSdp(offer);
+      console.log(`[Padhai WebRTC] Teacher: offer created, sdp length=${plainOffer.sdp?.length}`);
 
-      // Broadcast immediately to tabs on same browser
+      // Send offer via BroadcastChannel + server
+      const offerPayload = { offer: plainOffer, fromPeerId: this.peerId, streamType: this.currentStreamType };
+
       this.sendBroadcast({
         type: 'sdp-offer',
         payload: offerPayload,
@@ -212,54 +265,84 @@ export class WebRTCClassroomManager {
         timestamp: Date.now(),
       });
 
-      // Send to server signaling
-      this.sendSignal('sdp-offer', offerPayload);
+      this.sendSignal('sdp-offer', { ...offerPayload, targetPeerId: targetId });
     } catch (err) {
-      console.warn('Error creating WebRTC offer for peer:', targetId, err);
+      console.error('[Padhai WebRTC] Error creating offer:', err);
     }
   }
 
-  // Student handles incoming offer from host
-  private async handleIncomingOffer(offer: RTCSessionDescriptionInit, hostSenderId = 'host') {
+  // ─── Student: Handle Incoming Offer ────────────────────────────────
+
+  private async handleIncomingOffer(offerInit: RTCSessionDescriptionInit, hostSenderId = 'host') {
+    // Prevent duplicate concurrent negotiation
+    if (this.isNegotiating) {
+      console.log('[Padhai WebRTC] Student: already negotiating, ignoring duplicate offer');
+      return;
+    }
+    this.isNegotiating = true;
+
     try {
-      let pc = this.peerConnections.get('student_pc');
-      if (pc) {
-        try {
-          pc.close();
-        } catch {}
+      console.log(`[Padhai WebRTC] Student: handling offer from ${hostSenderId}, sdp length=${offerInit.sdp?.length}`);
+
+      // Close any existing student PC
+      const existing = this.peerConnections.get('student_pc');
+      if (existing) {
+        try { existing.close(); } catch {}
+        this.peerConnections.delete('student_pc');
       }
 
-      pc = new RTCPeerConnection(ICE_SERVERS);
+      const pc = new RTCPeerConnection(ICE_SERVERS);
       this.peerConnections.set('student_pc', pc);
+      this.pendingCandidates.set('student_pc', []);
 
+      // Track handler — fires when teacher's media tracks arrive
       pc.ontrack = (event) => {
+        console.log(`[Padhai WebRTC] Student: ontrack fired! kind=${event.track.kind}, streams=${event.streams.length}, readyState=${event.track.readyState}`);
         if (event.streams && event.streams[0] && this.onRemoteStreamCallback) {
           this.onRemoteStreamCallback(event.streams[0], this.currentStreamType || 'screen');
         }
       };
 
+      // ICE candidate handler — serialize before broadcast!
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          const candPayload = { candidate: event.candidate, targetPeerId: hostSenderId };
+          const serialized = serializeCandidate(event.candidate);
           this.sendBroadcast({
             type: 'ice-candidate',
-            payload: candPayload,
+            payload: { candidate: serialized, fromPeerId: this.peerId, targetPeerId: hostSenderId },
             senderId: this.peerId,
             senderName: this.userName,
             targetId: hostSenderId,
             timestamp: Date.now(),
           });
-          this.sendSignal('ice-candidate', candPayload);
+          this.sendSignal('ice-candidate', { candidate: serialized, fromPeerId: this.peerId, targetPeerId: hostSenderId });
         }
       };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[Padhai WebRTC] Student PC iceConnectionState: ${pc.iceConnectionState}`);
+      };
+      pc.onconnectionstatechange = () => {
+        console.log(`[Padhai WebRTC] Student PC connectionState: ${pc.connectionState}`);
+      };
+
+      // Set remote description (teacher's offer)
+      await pc.setRemoteDescription(new RTCSessionDescription(offerInit));
+      console.log('[Padhai WebRTC] Student: remote description (offer) set');
+
+      // *** CRITICAL: Flush any ICE candidates that arrived before remote desc was set ***
+      await this.flushPendingCandidates('student_pc');
+
+      // Create answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      const answerPayload = { answer, targetPeerId: hostSenderId };
+      const plainAnswer = serializeSdp(answer);
+      console.log(`[Padhai WebRTC] Student: answer created, sdp length=${plainAnswer.sdp?.length}`);
 
-      // Send answer via BroadcastChannel & Server
+      // Send answer via BroadcastChannel + server
+      const answerPayload = { answer: plainAnswer, fromPeerId: this.peerId, targetPeerId: hostSenderId };
+
       this.sendBroadcast({
         type: 'sdp-answer',
         payload: answerPayload,
@@ -271,35 +354,113 @@ export class WebRTCClassroomManager {
 
       this.sendSignal('sdp-answer', answerPayload);
     } catch (err) {
-      console.warn('WebRTC handle offer error:', err);
+      console.error('[Padhai WebRTC] Error handling offer:', err);
+    } finally {
+      this.isNegotiating = false;
     }
   }
 
-  // Host handles incoming answer from student
-  private async handleIncomingAnswer(answer: RTCSessionDescriptionInit, studentPeerId: string) {
+  // ─── Teacher: Handle Incoming Answer ───────────────────────────────
+
+  private async handleIncomingAnswer(answerInit: RTCSessionDescriptionInit, fromPeerId: string) {
     try {
-      const pc = this.peerConnections.get(studentPeerId) || this.peerConnections.get('all');
-      if (pc && pc.signalingState === 'have-local-offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      // Find the PC — try specific peer first, then 'broadcast' (generic)
+      const pc = this.peerConnections.get(fromPeerId) || this.peerConnections.get('broadcast');
+      if (!pc) {
+        console.warn(`[Padhai WebRTC] Teacher: no PC found for answer from ${fromPeerId}`);
+        return;
       }
+
+      if (pc.signalingState !== 'have-local-offer') {
+        console.warn(`[Padhai WebRTC] Teacher: PC not in have-local-offer (state=${pc.signalingState}), skipping answer`);
+        return;
+      }
+
+      await pc.setRemoteDescription(new RTCSessionDescription(answerInit));
+      console.log(`[Padhai WebRTC] Teacher: remote description (answer) set from ${fromPeerId}`);
+
+      // *** CRITICAL: Flush any ICE candidates from this student that arrived early ***
+      const pcKey = this.peerConnections.has(fromPeerId) ? fromPeerId : 'broadcast';
+      await this.flushPendingCandidates(pcKey);
     } catch (err) {
-      console.warn('WebRTC handle answer error:', err);
+      console.error('[Padhai WebRTC] Error handling answer:', err);
     }
   }
 
-  // Handle ICE candidate
-  private async handleIncomingIceCandidate(candidate: RTCIceCandidateInit) {
+  // ─── ICE Candidate Handling (with buffering) ───────────────────────
+
+  private async handleIncomingIceCandidate(candidateInit: RTCIceCandidateInit, fromPeerId?: string) {
+    // Determine which PC key to use
+    const pcKey = this.role === 'student' ? 'student_pc' : (fromPeerId || 'broadcast');
+    const pc = this.peerConnections.get(pcKey) || (this.role === 'teacher' ? this.peerConnections.get('broadcast') : null);
+
+    if (!pc) {
+      // No PC exists yet — buffer the candidate for later
+      console.log(`[Padhai WebRTC] Buffering ICE candidate (no PC for "${pcKey}" yet)`);
+      const key = this.role === 'student' ? 'student_pc' : 'broadcast';
+      if (!this.pendingCandidates.has(key)) {
+        this.pendingCandidates.set(key, []);
+      }
+      this.pendingCandidates.get(key)!.push(candidateInit);
+      return;
+    }
+
+    if (!pc.remoteDescription) {
+      // Remote description not set yet — buffer for later
+      console.log(`[Padhai WebRTC] Buffering ICE candidate (remote desc not set for "${pcKey}")`);
+      const key = this.peerConnections.has(pcKey) ? pcKey : 'broadcast';
+      if (!this.pendingCandidates.has(key)) {
+        this.pendingCandidates.set(key, []);
+      }
+      this.pendingCandidates.get(key)!.push(candidateInit);
+      return;
+    }
+
+    // PC exists and remote description is set — add immediately
     try {
-      const pc = this.role === 'student' ? this.peerConnections.get('student_pc') : this.peerConnections.get('all');
-      if (pc && pc.remoteDescription) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      }
+      await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
     } catch (err) {
-      console.warn('Add ICE candidate error:', err);
+      console.warn('[Padhai WebRTC] Error adding ICE candidate:', err);
     }
   }
 
-  // Send whiteboard draw stroke to all students
+  /**
+   * Flush all buffered ICE candidates for a given PC key.
+   * Called immediately after setRemoteDescription completes.
+   */
+  private async flushPendingCandidates(pcKey: string) {
+    const pc = this.peerConnections.get(pcKey);
+    if (!pc || !pc.remoteDescription) return;
+
+    // Collect candidates from this key
+    const candidates = this.pendingCandidates.get(pcKey) || [];
+
+    // For teacher's 'broadcast' PC, also drain any candidates keyed by student peer IDs
+    if (this.role === 'teacher') {
+      this.pendingCandidates.forEach((cands, key) => {
+        if (key !== pcKey && cands.length > 0) {
+          candidates.push(...cands);
+          this.pendingCandidates.set(key, []);
+        }
+      });
+    }
+
+    if (candidates.length > 0) {
+      console.log(`[Padhai WebRTC] Flushing ${candidates.length} buffered ICE candidates for "${pcKey}"`);
+      for (const cand of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (err) {
+          console.warn('[Padhai WebRTC] Error adding buffered ICE candidate:', err);
+        }
+      }
+    }
+
+    this.pendingCandidates.set(pcKey, []);
+  }
+
+  // ─── Whiteboard, Chat, Reaction Senders ────────────────────────────
+
   public sendWhiteboardStroke(strokeData: any) {
     const event: ClassroomEvent = {
       type: 'whiteboard-stroke',
@@ -312,7 +473,6 @@ export class WebRTCClassroomManager {
     this.sendSignal('whiteboard-stroke', strokeData);
   }
 
-  // Clear whiteboard
   public sendWhiteboardClear() {
     const event: ClassroomEvent = {
       type: 'whiteboard-clear',
@@ -325,7 +485,6 @@ export class WebRTCClassroomManager {
     this.sendSignal('whiteboard-clear', {});
   }
 
-  // Send chat message
   public sendChatMessage(msg: any) {
     const event: ClassroomEvent = {
       type: 'chat-message',
@@ -338,7 +497,6 @@ export class WebRTCClassroomManager {
     this.sendSignal('chat-message', msg);
   }
 
-  // Update chat message (upvote / answer)
   public sendChatUpdate(update: any) {
     const event: ClassroomEvent = {
       type: 'chat-update',
@@ -351,7 +509,6 @@ export class WebRTCClassroomManager {
     this.sendSignal('chat-update', update);
   }
 
-  // Send reaction emoji
   public sendReaction(emoji: string) {
     const event: ClassroomEvent = {
       type: 'reaction',
@@ -364,58 +521,89 @@ export class WebRTCClassroomManager {
     this.sendSignal('reaction', { emoji });
   }
 
-  // Handle incoming broadcast message from same machine
-  private handleBroadcastMessage(data: ClassroomEvent) {
-    if (data.senderId === this.peerId) return; // Ignore own message
+  // ─── BroadcastChannel Message Router ───────────────────────────────
 
-    if (data.type === 'host-stream') {
-      if (this.onHostStatusCallback) {
-        this.onHostStatusCallback(data.payload);
-      }
-      if (this.role === 'student' && data.payload.active) {
-        // Request connection if teacher active
-      }
-    } else if (data.type === 'sdp-offer') {
-      if (this.role === 'student' && (data.targetId === this.peerId || data.targetId === 'all' || !data.targetId)) {
-        this.handleIncomingOffer(data.payload.offer, data.senderId);
-      }
-    } else if (data.type === 'sdp-answer') {
-      if (this.role === 'teacher') {
-        this.handleIncomingAnswer(data.payload.answer, data.senderId);
-      }
-    } else if (data.type === 'ice-candidate') {
-      this.handleIncomingIceCandidate(data.payload.candidate);
-    } else if (data.type === 'whiteboard-stroke' || data.type === 'whiteboard-clear') {
-      if (this.onWhiteboardEventCallback) {
-        this.onWhiteboardEventCallback(data);
-      }
-    } else if (data.type === 'chat-message') {
-      if (this.onChatCallback) {
-        this.onChatCallback(data.payload);
-      }
-    } else if (data.type === 'chat-update') {
-      if (this.onChatUpdateCallback) {
-        this.onChatUpdateCallback(data.payload);
-      }
-    } else if (data.type === 'reaction') {
-      if (this.onReactionCallback) {
-        this.onReactionCallback(data.payload.emoji);
-      }
+  private handleBroadcastMessage(data: ClassroomEvent) {
+    if (data.senderId === this.peerId) return; // Ignore own messages
+
+    switch (data.type) {
+      case 'host-stream':
+        if (this.onHostStatusCallback) {
+          this.onHostStatusCallback(data.payload);
+        }
+        // Update local stream type tracking for student
+        if (this.role === 'student' && data.payload.streamType) {
+          this.currentStreamType = data.payload.streamType;
+        }
+        break;
+
+      case 'sdp-offer':
+        if (this.role === 'student') {
+          // Accept offer targeted at us, at 'all'/'broadcast', or unspecified
+          const target = data.targetId;
+          if (!target || target === 'all' || target === 'broadcast' || target === this.peerId) {
+            this.handleIncomingOffer(data.payload.offer, data.senderId);
+            // Also store stream type from offer
+            if (data.payload.streamType) {
+              this.currentStreamType = data.payload.streamType;
+            }
+          }
+        }
+        break;
+
+      case 'sdp-answer':
+        if (this.role === 'teacher') {
+          this.handleIncomingAnswer(data.payload.answer, data.senderId);
+        }
+        break;
+
+      case 'ice-candidate':
+        this.handleIncomingIceCandidate(data.payload.candidate, data.senderId);
+        break;
+
+      case 'whiteboard-stroke':
+      case 'whiteboard-clear':
+        if (this.onWhiteboardEventCallback) {
+          this.onWhiteboardEventCallback(data);
+        }
+        break;
+
+      case 'chat-message':
+        if (this.onChatCallback) {
+          this.onChatCallback(data.payload);
+        }
+        break;
+
+      case 'chat-update':
+        if (this.onChatUpdateCallback) {
+          this.onChatUpdateCallback(data.payload);
+        }
+        break;
+
+      case 'reaction':
+        if (this.onReactionCallback) {
+          this.onReactionCallback(data.payload.emoji);
+        }
+        break;
     }
   }
 
-  // Helper to send message via BroadcastChannel
+  // ─── BroadcastChannel Send Helper ──────────────────────────────────
+
   private sendBroadcast(data: ClassroomEvent) {
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(data);
       } catch (err) {
-        console.warn('Broadcast send error:', err);
+        // This should no longer happen now that we serialize ICE candidates,
+        // but log it loudly if it does.
+        console.error('[Padhai WebRTC] BroadcastChannel postMessage FAILED:', err, data.type);
       }
     }
   }
 
-  // Helper to send signal to server
+  // ─── Server Signaling Send Helper ──────────────────────────────────
+
   private async sendSignal(type: string, payload: any) {
     try {
       await fetch('/api/live/signal', {
@@ -430,11 +618,12 @@ export class WebRTCClassroomManager {
         }),
       });
     } catch {
-      // Ignore network hiccup
+      // Silently ignore network hiccup — server is a fallback, BroadcastChannel is primary for same-machine
     }
   }
 
-  // Periodic signaling poll
+  // ─── Periodic Server Signaling Poll ────────────────────────────────
+
   private startSignalingPoll() {
     const poll = async () => {
       try {
@@ -455,7 +644,6 @@ export class WebRTCClassroomManager {
             totalWhiteboardEvents,
             newChatMessages,
             totalChatMessages,
-            recentReactions,
             participants,
           } = json.data;
 
@@ -467,11 +655,13 @@ export class WebRTCClassroomManager {
               teacherName: 'Teacher',
             });
           }
+          if (this.role === 'student' && streamType) {
+            this.currentStreamType = streamType;
+          }
 
           // Update participants
           if (participants && this.onParticipantsCallback) {
             this.onParticipantsCallback(participants);
-            // Track new student participants for host
             if (this.role === 'teacher' && this.isBroadcasting) {
               participants.forEach((p: any) => {
                 if (p.role === 'student' && !this.knownParticipantIds.has(p.id)) {
@@ -482,7 +672,7 @@ export class WebRTCClassroomManager {
             }
           }
 
-          // Process new whiteboard events
+          // Whiteboard events from server
           if (newWhiteboardEvents && newWhiteboardEvents.length > 0) {
             this.lastWhiteboardIndex = totalWhiteboardEvents;
             if (this.onWhiteboardEventCallback) {
@@ -490,7 +680,7 @@ export class WebRTCClassroomManager {
             }
           }
 
-          // Process new chat messages
+          // Chat messages from server
           if (newChatMessages && newChatMessages.length > 0) {
             this.lastChatIndex = totalChatMessages;
             if (this.onChatCallback) {
@@ -498,46 +688,48 @@ export class WebRTCClassroomManager {
             }
           }
 
-          // Student connects WebRTC if offer received
+          // Student: connect WebRTC if server has an offer and we haven't connected yet
           if (this.role === 'student' && sdpOffer && !this.peerConnections.has('student_pc')) {
+            console.log('[Padhai WebRTC] Student: received SDP offer from server poll');
             this.handleIncomingOffer(sdpOffer);
           }
 
-          // Teacher processes student answer
-          if (this.role === 'teacher' && sdpAnswer) {
-            this.handleIncomingAnswer(sdpAnswer.answer, sdpAnswer.fromPeerId);
+          // Teacher: process student answer from server
+          if (this.role === 'teacher' && sdpAnswer && sdpAnswer.answer) {
+            this.handleIncomingAnswer(sdpAnswer.answer, sdpAnswer.fromPeerId || 'student');
           }
 
-          // Process ICE candidates
+          // Process ICE candidates from server
           if (iceCandidates && iceCandidates.length > 0) {
             iceCandidates.forEach((item: any) => {
-              if (item.candidate) {
-                this.handleIncomingIceCandidate(item.candidate);
+              const cand = item.candidate || item;
+              if (cand) {
+                this.handleIncomingIceCandidate(cand, item.fromPeerId);
               }
             });
           }
         }
       } catch {
-        // Polling retry
+        // Polling retry — no-op
       }
     };
 
     poll();
-    this.pollingInterval = setInterval(poll, 1000);
+    this.pollingInterval = setInterval(poll, 1200);
   }
 
+  // ─── Cleanup ───────────────────────────────────────────────────────
+
   public destroy() {
+    console.log('[Padhai WebRTC] Destroying manager');
     if (this.pollingInterval) clearInterval(this.pollingInterval);
     if (this.broadcastChannel) {
-      try {
-        this.broadcastChannel.close();
-      } catch {}
+      try { this.broadcastChannel.close(); } catch {}
     }
     this.peerConnections.forEach((pc) => {
-      try {
-        pc.close();
-      } catch {}
+      try { pc.close(); } catch {}
     });
     this.peerConnections.clear();
+    this.pendingCandidates.clear();
   }
 }
